@@ -141,32 +141,51 @@ function addTyping() {
   return node;
 }
 
-/* Turn "text [1] more [2]" into text nodes and clickable citation chips. */
-function renderAnswerText(text, sourcesNode) {
+/* Inline formatting: **bold** and [n] citation chips, built from DOM nodes (never innerHTML). */
+function renderInline(text, sourcesNode) {
   const fragment = document.createDocumentFragment();
-  text.split(/(\[\d+\])/).forEach((part) => {
-    const match = part.match(/^\[(\d+)\]$/);
-    if (!match) {
+  text.split(/(\*\*[^*\n]+\*\*|\[\d+\])/).forEach((part) => {
+    const bold = part.match(/^\*\*([^*\n]+)\*\*$/);
+    const cite = part.match(/^\[(\d+)\]$/);
+    if (bold) {
+      fragment.append(el("strong", { text: bold[1] }));
+    } else if (cite) {
+      const number = cite[1];
+      fragment.append(el("button", {
+        class: "chip", type: "button", title: `Show source ${number}`, text: number,
+        onclick: () => {
+          const target = sourcesNode.querySelector(`[data-n="${number}"]`);
+          if (!target) return;
+          target.open = true;
+          target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          target.classList.remove("flash");
+          void target.offsetWidth;
+          target.classList.add("flash");
+        },
+      }));
+    } else if (part) {
       fragment.append(document.createTextNode(part));
-      return;
     }
-    const number = match[1];
-    fragment.append(el("button", {
-      class: "chip", type: "button", title: `Show source ${number}`, text: number,
-      onclick: () => {
-        const target = sourcesNode.querySelector(`[data-n="${number}"]`);
-        if (!target) return;
-        target.open = true;
-        target.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        target.classList.remove("flash");
-        void target.offsetWidth;
-        target.classList.add("flash");
-      },
-    }));
   });
   return fragment;
 }
 
+/* Block formatting: paragraphs and "* item" / "- item" bullet lists. */
+function renderAnswerText(text, sourcesNode) {
+  const container = document.createDocumentFragment();
+  let list = null;
+  text.split("\n").forEach((line) => {
+    const item = line.match(/^\s*[*-]\s+(.*)$/);
+    if (item) {
+      if (!list) { list = el("ul"); container.append(list); }
+      list.append(el("li", {}, renderInline(item[1], sourcesNode)));
+      return;
+    }
+    list = null;
+    if (line.trim()) container.append(el("p", {}, renderInline(line.trim(), sourcesNode)));
+  });
+  return container;
+}
 function renderSources(citations) {
   const wrapper = el("div", { class: "sources" }, el("div", { class: "sources-title", text: "Sources" }));
   citations.forEach((citation) => {
@@ -182,7 +201,7 @@ function renderSources(citations) {
 
 function renderAssistant(result) {
   const sources = renderSources(result.citations);
-  const bubble = el("div", { class: "bubble" });
+  const bubble = el("div", { class: "bubble" + (result.found ? " rich" : "") });
   bubble.append(result.found ? renderAnswerText(result.answer, sources) : document.createTextNode(result.answer));
   const node = el("div", { class: "msg assistant" + (result.found ? "" : " notfound") }, bubble);
   if (result.found && result.citations.length) node.append(sources);

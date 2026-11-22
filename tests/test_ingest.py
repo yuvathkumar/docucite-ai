@@ -11,6 +11,7 @@ from app.rag.ingest import (
     FileTooLargeError,
     InvalidPdfError,
     clean_filename,
+    clean_page_text,
     ingest_pdf,
 )
 from tests.pdf_factory import make_pdf
@@ -77,6 +78,12 @@ def test_duplicate_upload_is_rejected_and_adds_nothing(db_session: Session) -> N
 
     assert error.value.document_id == first.id
     assert len(db_session.scalars(select(Document)).all()) == 1
+
+
+def test_clean_page_text_removes_symbol_font_junk() -> None:
+    """Turn private-use, replacement and arrow-symbol characters into spaces."""
+    assert clean_page_text("AB�C\U0001f83fD") == "A B C D"
+    assert clean_page_text("Plain text stays.") == "Plain text stays."
 
 
 def test_non_pdf_content_is_rejected(db_session: Session) -> None:

@@ -2,6 +2,7 @@
 
 import logging
 from array import array
+from typing import Final
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -11,7 +12,9 @@ from app.models import Chunk, ChunkEmbedding
 
 logger = logging.getLogger(__name__)
 
-VECTOR_TYPECODE = "f"  # 32-bit float: half the size of Python's float, plenty of precision
+# 32-bit float: half the size of Python's float, plenty of precision. ``Final`` lets the type
+# checker see the literal "f" and so know the array holds floats.
+VECTOR_TYPECODE: Final = "f"
 
 
 def pack_vector(values: list[float]) -> bytes:

@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import logging
 import secrets
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -23,8 +23,8 @@ SALT_BYTES = 16
 SESSION_USER_KEY = "user_id"
 MIN_PASSWORD_LENGTH = 8
 USERNAME_PATTERN = r"^[A-Za-z0-9_.-]{3,50}$"
-ADMIN_ROLE = "admin"
-USER_ROLE = "user"
+ADMIN_ROLE: Final = "admin"
+USER_ROLE: Final = "user"
 
 router = APIRouter(tags=["auth"])
 

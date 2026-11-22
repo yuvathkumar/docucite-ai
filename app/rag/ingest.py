@@ -3,6 +3,7 @@
 import hashlib
 import io
 import logging
+import re
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 PDF_MAGIC_BYTES = b"%PDF-"
 BYTES_PER_MB = 1024 * 1024
 DEFAULT_FILENAME = "document.pdf"
+JUNK_CHARACTERS = re.compile("[-�\U0001f800-\U0001f8ff]")
 
 
 class IngestError(Exception):
@@ -74,6 +76,25 @@ def validate_pdf_bytes(data: bytes, max_bytes: int) -> None:
         raise InvalidPdfError("The file is not a PDF.")
 
 
+def clean_page_text(text: str) -> str:
+    """Replace junk characters that PDF text extraction produces with spaces.
+
+    Symbol fonts (bullets, arrows) often come out as private-use or replacement
+    characters that show as empty boxes in answers and carry no meaning.
+
+    Args:
+        text: Raw text of one page.
+
+    Returns:
+        The text with those characters turned into spaces.
+
+    Example:
+        >>> clean_page_text("Skills  Python � SQL")
+        'Skills   Python   SQL'
+    """
+    return JUNK_CHARACTERS.sub(" ", text)
+
+
 def extract_pages(data: bytes) -> list[str]:
     """Extract the text of every page of a PDF.
 
@@ -90,7 +111,7 @@ def extract_pages(data: bytes) -> list[str]:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted:
             raise InvalidPdfError("Encrypted PDFs are not supported.")
-        return [page.extract_text() or "" for page in reader.pages]
+        return [clean_page_text(page.extract_text() or "") for page in reader.pages]
     except InvalidPdfError:
         raise
     except Exception as error:
