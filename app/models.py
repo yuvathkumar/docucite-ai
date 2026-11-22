@@ -2,10 +2,11 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 MAX_FILENAME_LENGTH = 255
+MAX_MODEL_NAME_LENGTH = 100
 SHA256_HEX_LENGTH = 64
 
 
@@ -74,3 +75,31 @@ class Chunk(Base):
     text: Mapped[str] = mapped_column(Text)
 
     document: Mapped[Document] = relationship(back_populates="chunks")
+    embedding: Mapped["ChunkEmbedding | None"] = relationship(
+        back_populates="chunk", cascade="all, delete-orphan"
+    )
+
+
+class ChunkEmbedding(Base):
+    """The embedding vector of one chunk.
+
+    Kept in its own table so a chunk is searchable by keyword before it has a
+    vector, and so existing databases need no migration.
+
+    Attributes:
+        chunk_id: The chunk this vector belongs to (also the primary key).
+        model: Embedding model that produced the vector. Vectors from different
+            models cannot be compared, so this lets us detect a model change.
+        dimensions: Number of values in the vector.
+        vector: The values packed as 32-bit floats (see ``app.rag.embeddings``).
+        chunk: The owning chunk.
+    """
+
+    __tablename__ = "chunk_embeddings"
+
+    chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id"), primary_key=True)
+    model: Mapped[str] = mapped_column(String(MAX_MODEL_NAME_LENGTH))
+    dimensions: Mapped[int]
+    vector: Mapped[bytes] = mapped_column(LargeBinary)
+
+    chunk: Mapped[Chunk] = relationship(back_populates="embedding")

@@ -1,10 +1,13 @@
 """Tests for the ``/documents`` endpoints."""
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
 
 from app import create_app
 from app.config import Settings
+from app.llm import UnavailableEmbedder
+from app.llm.fake import FakeEmbedder
 from tests.pdf_factory import make_pdf
 
 PDF_TYPE = "application/pdf"
@@ -88,7 +91,60 @@ def test_oversized_upload_returns_413() -> None:
     settings = Settings(database_url="sqlite://", max_upload_mb=1, _env_file=None)
     too_big = b"%PDF-" + b"0" * BYTES_PER_MB
 
-    with TestClient(create_app(settings)) as client:
+    with TestClient(create_app(settings, embedder=FakeEmbedder())) as client:
         response = upload(client, too_big)
 
     assert response.status_code == 413
+
+
+def test_upload_creates_embeddings_for_every_chunk(client: TestClient) -> None:
+    """Report all chunks as embedded when the provider works."""
+    body = upload(client, make_pdf(["Vacation policy.", "Expense policy."])).json()
+
+    assert body["chunk_count"] == 2
+    assert body["embedded_chunk_count"] == 2
+    assert client.get("/documents").json()[0]["embedded_chunk_count"] == 2
+
+
+def test_upload_succeeds_when_the_embedding_provider_is_down() -> None:
+    """Keep the document (and keyword search) even if embedding fails."""
+    settings = Settings(database_url="sqlite://", _env_file=None)
+    down = UnavailableEmbedder("provider down")
+
+    with TestClient(create_app(settings, embedder=down)) as client:
+        response = upload(client, make_pdf(["Still searchable by keyword."]))
+
+    assert response.status_code == 201
+    assert response.json()["chunk_count"] == 1
+    assert response.json()["embedded_chunk_count"] == 0
+
+
+def test_embeddings_endpoint_retries_after_a_failure(app: FastAPI, client: TestClient) -> None:
+    """Fill in missing vectors once the provider is back."""
+    app.state.embedder = UnavailableEmbedder("provider down")
+    document_id = upload(client, make_pdf(["Retry me."])).json()["id"]
+    assert client.get("/documents").json()[0]["embedded_chunk_count"] == 0
+
+    app.state.embedder = FakeEmbedder()
+    response = client.post(f"/documents/{document_id}/embeddings")
+
+    assert response.status_code == 200
+    assert response.json()["embedded_chunk_count"] == 1
+
+
+def test_embeddings_endpoint_returns_404_for_unknown_document(client: TestClient) -> None:
+    """Report a missing document instead of failing silently."""
+    assert client.post("/documents/999/embeddings").status_code == 404
+
+
+def test_embeddings_endpoint_returns_502_when_provider_fails(
+    app: FastAPI, client: TestClient
+) -> None:
+    """Tell the caller the upstream provider failed, not that they sent a bad request."""
+    app.state.embedder = UnavailableEmbedder("provider down")
+    document_id = upload(client, make_pdf(["Needs a vector."])).json()["id"]
+
+    response = client.post(f"/documents/{document_id}/embeddings")
+
+    assert response.status_code == 502
+    assert "provider down" in response.json()["detail"]

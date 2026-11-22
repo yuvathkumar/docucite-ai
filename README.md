@@ -13,8 +13,12 @@ _Coming soon._
 - **PDF ingestion:** `POST /documents` uploads a PDF; its text is extracted page by page, split into
   overlapping chunks and indexed for keyword search (SQLite FTS5). `GET /documents` lists them.
   Scanned (image-only) PDFs are not supported. There is no access control yet.
+- **Embeddings:** after upload, each chunk is turned into a vector by the configured provider
+  (Gemini by default) and stored. If the provider is down, the upload still succeeds and
+  `POST /documents/{id}/embeddings` retries it. **Chunk text is sent to the provider (Google),
+  so do not upload confidential documents while using Gemini's free tier.**
 
-_Planned: embeddings and vector search, cited answers, admin/user roles, question log._
+_Planned: vector search, cited answers, admin/user roles, question log._
 
 ## Tech stack
 

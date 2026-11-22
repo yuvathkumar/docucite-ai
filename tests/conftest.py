@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app import create_app
 from app.config import Settings
 from app.db import create_db_engine, create_session_factory, init_db
+from app.llm.fake import FakeEmbedder
 
 TEST_DATABASE_URL = "sqlite://"
 
@@ -32,8 +33,8 @@ def db_session() -> Iterator[Session]:
 
 @pytest.fixture
 def app(settings: Settings) -> FastAPI:
-    """Build a fresh application for each test."""
-    return create_app(settings)
+    """Build a fresh application for each test, with a fake embedder (no network)."""
+    return create_app(settings, embedder=FakeEmbedder())
 
 
 @pytest.fixture
