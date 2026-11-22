@@ -5,11 +5,6 @@
  * textContent / createTextNode, never innerHTML: it is untrusted and must not run as markup. */
 
 const $ = (selector) => document.querySelector(selector);
-const SUGGESTIONS = [
-  "What is the policy on vacation days?",
-  "Summarise the key points of the uploaded documents",
-  "Which document mentions deadlines?",
-];
 
 let currentUser = null;
 
@@ -113,7 +108,10 @@ function switchView(name) {
   });
   document.querySelectorAll(".view").forEach((view) => { view.hidden = view.id !== `view-${name}`; });
   if (loaders[name]) loaders[name]().catch((error) => toast(error.message, true));
-  if (name === "ask") $("#question").focus();
+  if (name === "ask") {
+    $("#question").focus();
+    refreshAskHints();
+  }
 }
 
 document.querySelectorAll(".nav-item").forEach((button) => {
@@ -247,10 +245,36 @@ function autoGrow() {
 }
 questionBox.addEventListener("input", autoGrow);
 
-SUGGESTIONS.forEach((text) => {
-  $("#suggestions").append(el("button", {
-    class: "suggestion", type: "button", text, onclick: () => ask(text),
-  }));
+/* Suggestions and "no documents" notice, based on what has actually been uploaded. */
+const GENERIC_SUGGESTIONS = [
+  "What are the main rules or requirements?",
+  "What deadlines or dates are mentioned?",
+  "Who is responsible for what?",
+];
+const MAX_SUGGESTIONS = 4;
+
+async function refreshAskHints() {
+  let documents = [];
+  try {
+    documents = await api("/documents");
+  } catch { return; }
+  const isAdmin = currentUser && currentUser.role === "admin";
+  $("#no-docs").hidden = documents.length > 0;
+  $("#no-docs-admin").hidden = !isAdmin;
+  $("#no-docs-user").hidden = isAdmin;
+  const suggestions = $("#suggestions");
+  suggestions.replaceChildren();
+  if (documents.length === 0) return;
+  const questions = [`Summarise “${documents[0].filename}” in a few bullet points`, ...GENERIC_SUGGESTIONS];
+  questions.slice(0, MAX_SUGGESTIONS).forEach((text) => {
+    suggestions.append(el("button", {
+      class: "suggestion", type: "button", text, onclick: () => ask(text),
+    }));
+  });
+}
+
+document.querySelectorAll("[data-goto]").forEach((button) => {
+  button.addEventListener("click", () => switchView(button.dataset.goto));
 });
 
 /* ---------- documents ---------- */
