@@ -6,6 +6,9 @@
 instance/
 *.db
 
+# Downloaded sample PDFs (public domain, recorded in data/SOURCES.md, but not committed)
+data/samples/*.pdf
+
 # Python and tool caches
 *.egg-info/
 build/

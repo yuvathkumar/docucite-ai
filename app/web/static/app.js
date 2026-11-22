@@ -285,7 +285,18 @@ async function loadDocuments() {
       el("td", { class: "num", text: String(doc.page_count) }),
       el("td", { class: "num", text: String(doc.chunk_count) }),
       status,
-      el("td", { class: "muted", text: formatDate(doc.uploaded_at) })));
+      el("td", { class: "muted", text: formatDate(doc.uploaded_at) }),
+      el("td", {}, isAdmin ? el("button", {
+        class: "link danger small", type: "button", text: "Delete",
+        onclick: async () => {
+          if (!confirm(`Delete “${doc.filename}”? Its passages and search data will be removed.`)) return;
+          try {
+            await api(`/documents/${doc.id}`, { method: "DELETE" });
+            toast("Document deleted.");
+          } catch (error) { toast(error.message, true); }
+          loadDocuments();
+        },
+      }) : null)));
   });
 }
 

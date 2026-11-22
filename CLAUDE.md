@@ -17,7 +17,7 @@ Claude Code reads this file at the start of every session. These rules apply to 
   - SQLAlchemy is pinned to `>=2.0,<2.1`: version 2.1 loads compiled modules that Smart App Control blocks, while 2.0.x honours `DISABLE_SQLALCHEMY_CEXT_RUNTIME=1`.
   - **ruff runs locally. mypy is CI-only:** it needs the compiled `librt` module, which Application Control blocks and which has no pure-Python version.
 - SQLite (via SQLAlchemy 2.0), pypdf, pytest
-- LLM and embeddings: **Ollama** (free, Windows installer) by default, or the **Gemini API** free tier, called over HTTP with the standard library
+- LLM and embeddings: the **Gemini API** free tier (the only provider implemented; `LLM_PROVIDER=ollama` is accepted by the settings but not built yet), called over HTTP with `httpx` (pure Python; chosen over the standard library for retries and mock-transport tests)
 - GitHub Actions for CI. It runs in the cloud, so nothing is installed locally.
 
 ## 2. Who I am and how to work with me
@@ -135,14 +135,14 @@ docucite-ai/
 │   ├── config.py           # Settings from env / .env
 │   ├── db.py               # SQLAlchemy engine, session, FTS5 setup
 │   ├── models.py           # Tables: users, documents, chunks, questions
-│   ├── web/                # Routes / API endpoints and templates
+│   ├── web/                # Routes (health, auth, documents, ask) + static/ single-page UI
 │   ├── rag/                # ingest, chunking, embeddings, search, prompts
 │   └── llm/                # Provider interface + Ollama, Gemini, Fake
 ├── data/
 │   ├── samples/            # Openly licensed sample PDFs
 │   └── SOURCES.md
 ├── scripts/                # check_env.py, check_llm.py
-├── tests/
+├── tests/                  # pytest; pdf_factory.py builds PDFs in memory (no sample files)
 ├── pyproject.toml
 ├── .env.example
 ├── .gitignore

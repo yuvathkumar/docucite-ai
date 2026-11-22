@@ -15,10 +15,49 @@ BATCH_SIZE = 100
 REQUEST_TIMEOUT_SECONDS = 60.0
 MAX_ATTEMPTS = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
+MAX_RETRY_DELAY_SECONDS = 40.0
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 DOCUMENT_TASK_TYPE = "RETRIEVAL_DOCUMENT"
 QUERY_TASK_TYPE = "RETRIEVAL_QUERY"
 GENERATION_TEMPERATURE = 0.2  # low: answers should stick to the passages, not improvise
+
+
+def retry_delay_seconds(response: httpx.Response | None, attempt: int) -> float:
+    """Decide how long to wait before retrying a failed request.
+
+    When Gemini rate-limits us (HTTP 429) it says how long to wait, either in a
+    ``Retry-After`` header or as ``retryDelay`` (for example ``"34s"``) in the
+    error body. Obeying it works far better than guessing: free-tier limits are
+    per minute, so a 1-2 second wait just fails again. The wait is capped so one
+    request never blocks for minutes.
+
+    Args:
+        response: The failed response, or None after a network error.
+        attempt: Which attempt just failed, starting at 1.
+
+    Returns:
+        Seconds to wait.
+
+    Example:
+        >>> retry_delay_seconds(None, 2)
+        2.0
+        >>> retry_delay_seconds(httpx.Response(429, headers={"Retry-After": "7"}), 1)
+        7.0
+    """
+    default = RETRY_BASE_DELAY_SECONDS * float(2 ** (attempt - 1))
+    if response is None:
+        return default
+    header = response.headers.get("retry-after", "")
+    if header.replace(".", "", 1).isdigit():
+        return min(float(header), MAX_RETRY_DELAY_SECONDS)
+    try:
+        for detail in response.json()["error"]["details"]:
+            delay = detail.get("retryDelay")
+            if isinstance(delay, str) and delay.endswith("s"):
+                return min(max(float(delay[:-1]), default), MAX_RETRY_DELAY_SECONDS)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        pass
+    return default
 
 
 class GeminiHttp:
@@ -65,6 +104,7 @@ class GeminiHttp:
         headers = {"x-goog-api-key": self._api_key, "Content-Type": "application/json"}
         reason = ""
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            failed_response: httpx.Response | None = None
             try:
                 response = self._client.post(url, headers=headers, json=body)
             except httpx.TransportError as error:
@@ -75,9 +115,10 @@ class GeminiHttp:
                 if response.status_code not in RETRYABLE_STATUS_CODES:
                     raise error_type(f"Gemini returned HTTP {response.status_code}.")
                 reason = f"HTTP {response.status_code}"
+                failed_response = response
             logger.warning("Gemini attempt %d/%d failed: %s", attempt, MAX_ATTEMPTS, reason)
             if attempt < MAX_ATTEMPTS:
-                self._sleep(RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1))
+                self._sleep(retry_delay_seconds(failed_response, attempt))
         raise error_type(f"Gemini is unavailable after {MAX_ATTEMPTS} attempts ({reason}).")
 
 

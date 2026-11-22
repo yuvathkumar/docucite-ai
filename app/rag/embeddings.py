@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 # 32-bit float: half the size of Python's float, plenty of precision. ``Final`` lets the type
 # checker see the literal "f" and so know the array holds floats.
 VECTOR_TYPECODE: Final = "f"
+# Small groups keep each API request under free-tier token limits and bound lost work.
+EMBED_GROUP_SIZE = 25
 
 
 def pack_vector(values: list[float]) -> bytes:
@@ -51,7 +53,9 @@ def embed_missing_chunks(session: Session, embedder: Embedder, document_id: int)
     """Embed every chunk of a document that does not have a vector yet.
 
     Safe to call again: chunks that already have a vector are skipped, so a
-    failed run (provider down, quota) can simply be retried.
+    failed run (provider down, rate limit) can simply be retried. Progress is
+    saved after every group of ``EMBED_GROUP_SIZE`` chunks, so a failure midway
+    keeps everything embedded before it.
 
     Args:
         session: Database session.
@@ -70,22 +74,26 @@ def embed_missing_chunks(session: Session, embedder: Embedder, document_id: int)
         .where(Chunk.document_id == document_id, ChunkEmbedding.chunk_id.is_(None))
         .order_by(Chunk.id)
     ).all()
-    if not chunks:
-        return 0
-    vectors = embedder.embed_documents([chunk.text for chunk in chunks])
-    if len(vectors) != len(chunks):
-        raise EmbeddingError("The provider returned a different number of vectors than chunks.")
-    for chunk, vector in zip(chunks, vectors, strict=True):
-        session.add(
-            ChunkEmbedding(
-                chunk_id=chunk.id,
-                model=embedder.model_name,
-                dimensions=len(vector),
-                vector=pack_vector(vector),
+    embedded = 0
+    for start in range(0, len(chunks), EMBED_GROUP_SIZE):
+        group = chunks[start : start + EMBED_GROUP_SIZE]
+        vectors = embedder.embed_documents([chunk.text for chunk in group])
+        if len(vectors) != len(group):
+            raise EmbeddingError("The provider returned a different number of vectors than chunks.")
+        for chunk, vector in zip(group, vectors, strict=True):
+            session.add(
+                ChunkEmbedding(
+                    chunk_id=chunk.id,
+                    model=embedder.model_name,
+                    dimensions=len(vector),
+                    vector=pack_vector(vector),
+                )
             )
-        )
-    session.commit()
-    return len(chunks)
+        # Commit per group: if the provider rate-limits us midway, the groups already
+        # done stay saved and a retry continues from where this one stopped.
+        session.commit()
+        embedded += len(group)
+    return embedded
 
 
 def count_embedded_chunks(session: Session) -> dict[int, int]:

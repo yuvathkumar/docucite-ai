@@ -20,6 +20,7 @@ from app.rag.ingest import (
     EmptyPdfError,
     FileTooLargeError,
     InvalidPdfError,
+    delete_document,
     ingest_pdf,
 )
 from app.web.ask import get_embedder
@@ -171,8 +172,33 @@ def embed_document(
     try:
         embed_missing_chunks(session, embedder, document_id)
     except EmbeddingError as error:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(error)) from error
+        done = count_embedded_chunks(session).get(document_id, 0)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"{error} {done} of {document.chunk_count} passages are indexed so far; "
+            "wait a minute and press Retry to continue.",
+        ) from error
     return _to_out(document, count_embedded_chunks(session).get(document_id, 0))
+
+
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_404_NOT_FOUND: {"description": "No such document."}},
+)
+def remove_document(document_id: int, session: SessionDep, _admin: AdminDep) -> None:
+    """Delete a document and everything stored for it (admins only).
+
+    Args:
+        document_id: The document to delete.
+        session: Database session for this request.
+        _admin: Ensures the caller is an admin.
+
+    Raises:
+        HTTPException: 404 if the document does not exist.
+    """
+    if not delete_document(session, document_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
 
 
 @router.get("", response_model=list[DocumentOut])

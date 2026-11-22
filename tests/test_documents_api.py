@@ -133,6 +133,42 @@ def test_embeddings_endpoint_retries_after_a_failure(app: FastAPI, client: TestC
     assert response.json()["embedded_chunk_count"] == 1
 
 
+def test_delete_removes_document_and_its_searchability(client: TestClient) -> None:
+    """Make a deleted document disappear from the list and from answers."""
+    document_id = upload(client, make_pdf(["Zebra policy applies to all staff."])).json()["id"]
+
+    assert client.delete(f"/documents/{document_id}").status_code == 204
+
+    assert client.get("/documents").json() == []
+    answer = client.post("/ask", json={"question": "zebra policy"}).json()
+    assert answer["found"] is False
+
+
+def test_deleted_file_can_be_uploaded_again(client: TestClient) -> None:
+    """Free the duplicate-detection hash when a document is deleted."""
+    pdf = make_pdf(["Re-uploadable content."])
+    document_id = upload(client, pdf).json()["id"]
+    client.delete(f"/documents/{document_id}")
+
+    assert upload(client, pdf).status_code == 201
+
+
+def test_delete_unknown_document_returns_404(client: TestClient) -> None:
+    """Report a missing document."""
+    assert client.delete("/documents/999").status_code == 404
+
+
+def test_delete_is_admin_only(client: TestClient) -> None:
+    """Forbid normal users and anonymous callers from deleting."""
+    document_id = upload(client, make_pdf(["Protected."])).json()["id"]
+    client.post("/users", json={"username": "alice", "password": "correct-horse"})
+    client.post("/auth/logout")
+    assert client.delete(f"/documents/{document_id}").status_code == 401
+    log_in(client, "alice", "correct-horse")
+
+    assert client.delete(f"/documents/{document_id}").status_code == 403
+
+
 def test_embeddings_endpoint_returns_404_for_unknown_document(client: TestClient) -> None:
     """Report a missing document instead of failing silently."""
     assert client.post("/documents/999/embeddings").status_code == 404

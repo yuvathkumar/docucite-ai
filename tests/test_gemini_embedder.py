@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from app.llm.base import EmbeddingError
-from app.llm.gemini import BATCH_SIZE, MAX_ATTEMPTS, GeminiEmbedder
+from app.llm.gemini import BATCH_SIZE, MAX_ATTEMPTS, GeminiEmbedder, retry_delay_seconds
 
 API_KEY = "test-key-123"
 MODEL = "gemini-embedding-001"
@@ -88,6 +88,44 @@ def test_temporary_error_is_retried_with_growing_delay() -> None:
     assert result == [[0.1, 0.2]]
     assert calls["count"] == 3
     assert sleeps == [1.0, 2.0]
+
+
+def test_rate_limit_waits_as_long_as_gemini_asks() -> None:
+    """Obey a ``Retry-After`` header instead of retrying after a second."""
+    calls = {"count": 0}
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "7"})
+        return embeddings_response(request)
+
+    make_embedder(handler, sleeps).embed_documents(["x"])
+
+    assert sleeps == [7.0]
+
+
+def test_rate_limit_uses_retry_delay_from_the_error_body() -> None:
+    """Read Gemini's ``retryDelay`` (for example "12s") from the JSON error details."""
+    calls = {"count": 0}
+    sleeps: list[float] = []
+    body = {"error": {"details": [{"retryDelay": "12s"}]}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        return (
+            httpx.Response(429, json=body) if calls["count"] == 1 else embeddings_response(request)
+        )
+
+    make_embedder(handler, sleeps).embed_documents(["x"])
+
+    assert sleeps == [12.0]
+
+
+def test_retry_delay_is_capped() -> None:
+    """Never block a request for minutes, whatever the server asks."""
+    assert retry_delay_seconds(httpx.Response(429, headers={"Retry-After": "900"}), 1) == 40.0
 
 
 def test_gives_up_after_max_attempts() -> None:

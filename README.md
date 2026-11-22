@@ -16,8 +16,8 @@ _Add screenshots of the chat, documents and login pages here._
   still answers.
 - **PDF ingestion:** page-aware chunking with overlap, duplicate detection (SHA-256), size and
   signature checks. Scanned (image-only) PDFs are not supported.
-- **Roles:** admins upload documents, manage users and review the **question log**; users ask
-  questions. Passwords are salted PBKDF2 hashes; sessions use signed cookies.
+- **Roles:** admins upload and delete documents, manage users and review the **question log**; users
+  ask questions. Passwords are salted PBKDF2 hashes; sessions use signed cookies.
 - **Web interface:** single-page app (no build step), light/dark theme, mobile friendly.
 - **Provider-agnostic:** Gemini sits behind `Embedder` / `ChatModel` interfaces; tests use fakes and
   never touch the network.
@@ -87,4 +87,12 @@ See `CLAUDE.md` section 7.
 
 ## Sample documents
 
-Only openly licensed or self-written documents are used. See `data/SOURCES.md`.
+Only openly licensed or self-written documents are used for demos and screenshots, for example
+NIST SP 800-63B and IRS Publication 1 (US government works, public domain). See `data/SOURCES.md`.
+Never upload personal or confidential documents while using the Gemini free tier.
+
+## Known limits
+
+- Only Gemini is implemented as the LLM and embedding provider (Ollama is not built yet).
+- Scanned (image-only) PDFs are not supported (no OCR).
+- Login attempts are not rate-limited yet.

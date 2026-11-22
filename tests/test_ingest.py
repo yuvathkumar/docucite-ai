@@ -4,7 +4,9 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.models import Chunk, Document
+from app.llm.fake import FakeEmbedder
+from app.models import Chunk, ChunkEmbedding, Document
+from app.rag.embeddings import embed_missing_chunks
 from app.rag.ingest import (
     DuplicateDocumentError,
     EmptyPdfError,
@@ -12,6 +14,7 @@ from app.rag.ingest import (
     InvalidPdfError,
     clean_filename,
     clean_page_text,
+    delete_document,
     ingest_pdf,
 )
 from tests.pdf_factory import make_pdf
@@ -84,6 +87,27 @@ def test_clean_page_text_removes_symbol_font_junk() -> None:
     """Turn private-use, replacement and arrow-symbol characters into spaces."""
     assert clean_page_text("AB�C\U0001f83fD") == "A B C D"
     assert clean_page_text("Plain text stays.") == "Plain text stays."
+
+
+def test_delete_document_removes_chunks_embeddings_and_index(db_session: Session) -> None:
+    """Leave no trace of a deleted document anywhere, including the FTS5 index."""
+    document = ingest(db_session, make_pdf(["Quokka handling rules."]))
+    embed_missing_chunks(db_session, FakeEmbedder(), document.id)
+
+    assert delete_document(db_session, document.id) is True
+
+    assert db_session.scalars(select(Document)).all() == []
+    assert db_session.scalars(select(Chunk)).all() == []
+    assert db_session.scalars(select(ChunkEmbedding)).all() == []
+    hits = db_session.execute(
+        text("SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH 'quokka'")
+    ).all()
+    assert hits == []
+
+
+def test_delete_missing_document_returns_false(db_session: Session) -> None:
+    """Report that there was nothing to delete."""
+    assert delete_document(db_session, 12345) is False
 
 
 def test_non_pdf_content_is_rejected(db_session: Session) -> None:

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.db import index_chunks
+from app.db import index_chunks, remove_from_index
 from app.models import MAX_FILENAME_LENGTH, Chunk, Document
 from app.rag.chunking import split_into_chunks
 
@@ -54,6 +54,28 @@ class DuplicateDocumentError(IngestError):
         """
         super().__init__("This document has already been uploaded.")
         self.document_id = document_id
+
+
+def delete_document(session: Session, document_id: int) -> bool:
+    """Delete a document with its chunks, embeddings and keyword-index entries.
+
+    Everything is removed in one transaction. Questions already logged keep their
+    text; only the stored passages disappear.
+
+    Args:
+        session: Database session.
+        document_id: The document to delete.
+
+    Returns:
+        True if the document existed and was deleted, False if there was none.
+    """
+    document = session.get(Document, document_id)
+    if document is None:
+        return False
+    remove_from_index(session, [chunk.id for chunk in document.chunks])
+    session.delete(document)
+    session.commit()
+    return True
 
 
 def validate_pdf_bytes(data: bytes, max_bytes: int) -> None:

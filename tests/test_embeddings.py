@@ -14,6 +14,7 @@ from app.llm.fake import FakeEmbedder
 from app.llm.gemini import GeminiEmbedder
 from app.models import Chunk, ChunkEmbedding
 from app.rag.embeddings import (
+    EMBED_GROUP_SIZE,
     count_embedded_chunks,
     embed_missing_chunks,
     pack_vector,
@@ -105,6 +106,41 @@ def test_failed_provider_stores_nothing(db_session: Session) -> None:
 
     assert db_session.scalars(select(ChunkEmbedding)).all() == []
     assert db_session.scalars(select(Chunk)).all() != []
+
+
+class FailsAfterFirstGroup:
+    """A provider that rate-limits every call after the first one."""
+
+    model_name = "flaky"
+
+    def __init__(self) -> None:
+        """Start with no calls made."""
+        self.calls = 0
+
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        """Succeed once, then fail like a rate limit."""
+        self.calls += 1
+        if self.calls > 1:
+            raise EmbeddingError("rate limited")
+        return [[1.0, 0.0]] * len(texts)
+
+
+def test_progress_is_kept_when_the_provider_fails_midway(db_session: Session) -> None:
+    """Keep finished groups, then let a later retry finish only the rest."""
+    long_page = " ".join(f"word{number}" for number in range(2000))
+    document = ingest_pdf(
+        db_session, "big.pdf", make_pdf([long_page]), max_bytes=10**6, max_chars=100, overlap=10
+    )
+    assert document.chunk_count > EMBED_GROUP_SIZE
+
+    with pytest.raises(EmbeddingError, match="rate limited"):
+        embed_missing_chunks(db_session, FailsAfterFirstGroup(), document.id)
+
+    saved = count_embedded_chunks(db_session)[document.id]
+    assert saved == EMBED_GROUP_SIZE
+    remaining = embed_missing_chunks(db_session, FakeEmbedder(), document.id)
+    assert remaining == document.chunk_count - EMBED_GROUP_SIZE
+    assert count_embedded_chunks(db_session)[document.id] == document.chunk_count
 
 
 def test_wrong_vector_count_is_rejected(db_session: Session) -> None:

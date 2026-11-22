@@ -85,6 +85,21 @@ def init_db(engine: Engine) -> None:
     init_fts(engine)
 
 
+def remove_from_index(session: Session, chunk_ids: Iterable[int]) -> None:
+    """Remove chunks from the FTS5 keyword index.
+
+    FTS5 is not a normal table, so deleting a chunk row does not delete its
+    index entry; without this, deleted text would still be searchable.
+
+    Args:
+        session: Session whose transaction the deletes join (the caller commits).
+        chunk_ids: Ids of the chunks to remove.
+    """
+    params = [{"chunk_id": chunk_id} for chunk_id in chunk_ids]
+    if params:
+        session.execute(text(f"DELETE FROM {FTS_TABLE_NAME} WHERE chunk_id = :chunk_id"), params)
+
+
 def get_session(request: Request) -> Iterator[Session]:
     """Provide one database session per request (a FastAPI dependency).
 
