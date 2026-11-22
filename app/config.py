@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +26,11 @@ class Settings(BaseSettings):
         gemini_api_key: Gemini API key. A ``SecretStr`` so it is masked if the
             settings object is ever printed or logged. Only needed for Gemini.
         gemini_model: Gemini model used to write answers.
+        max_upload_mb: Largest PDF accepted, in megabytes. Uploads are untrusted,
+            so an upper bound protects memory and disk.
+        chunk_max_chars: Maximum characters per text chunk.
+        chunk_overlap: Characters repeated between neighbouring chunks of a page.
+            Must be smaller than ``chunk_max_chars``.
     """
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -37,6 +42,16 @@ class Settings(BaseSettings):
     embed_model: str = "gemini-embedding-001"
     gemini_api_key: SecretStr = SecretStr("")
     gemini_model: str = "gemini-3.5-flash"
+    max_upload_mb: int = Field(default=20, ge=1)
+    chunk_max_chars: int = Field(default=1200, ge=1)
+    chunk_overlap: int = Field(default=200, ge=0)
+
+    @model_validator(mode="after")
+    def _overlap_smaller_than_chunk(self) -> "Settings":
+        """Reject an overlap that would stop the chunker from making progress."""
+        if self.chunk_overlap >= self.chunk_max_chars:
+            raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_MAX_CHARS")
+        return self
 
 
 @lru_cache

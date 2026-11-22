@@ -1,13 +1,17 @@
 """Database engine, sessions and SQLite FTS5 setup."""
 
 import logging
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
+from fastapi import Request
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from app.models import Base
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +73,49 @@ def init_fts(engine: Engine) -> None:
                 "USING fts5(text, chunk_id UNINDEXED)"
             )
         )
+
+
+def init_db(engine: Engine) -> None:
+    """Create all tables and the FTS5 index if they do not exist yet.
+
+    Args:
+        engine: Engine of the database to prepare.
+    """
+    Base.metadata.create_all(engine)
+    init_fts(engine)
+
+
+def get_session(request: Request) -> Iterator[Session]:
+    """Provide one database session per request (a FastAPI dependency).
+
+    The ``with`` block closes the session even if the endpoint raises, so
+    connections are never leaked.
+
+    Args:
+        request: The current request; carries the app's session factory.
+
+    Yields:
+        An open session.
+    """
+    factory: sessionmaker[Session] = request.app.state.session_factory
+    with factory() as session:
+        yield session
+
+
+def index_chunks(session: Session, chunks: Iterable[tuple[int, str]]) -> None:
+    """Add chunks to the FTS5 keyword index.
+
+    The caller commits, so the chunk rows and their index entries are saved
+    together or not at all.
+
+    Args:
+        session: Session whose transaction the inserts join.
+        chunks: Pairs of ``(chunk_id, text)``.
+    """
+    session.execute(
+        text(f"INSERT INTO {FTS_TABLE_NAME} (text, chunk_id) VALUES (:text, :chunk_id)"),
+        [{"text": chunk_text, "chunk_id": chunk_id} for chunk_id, chunk_text in chunks],
+    )
 
 
 def check_database(engine: Engine) -> bool:

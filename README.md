@@ -10,7 +10,11 @@ _Coming soon._
 
 ## Features
 
-_Planned: PDF ingestion, hybrid search (keyword + vector), cited answers, admin/user roles, question log._
+- **PDF ingestion:** `POST /documents` uploads a PDF; its text is extracted page by page, split into
+  overlapping chunks and indexed for keyword search (SQLite FTS5). `GET /documents` lists them.
+  Scanned (image-only) PDFs are not supported. There is no access control yet.
+
+_Planned: embeddings and vector search, cited answers, admin/user roles, question log._
 
 ## Tech stack
 
