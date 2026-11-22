@@ -7,6 +7,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 MAX_FILENAME_LENGTH = 255
 MAX_MODEL_NAME_LENGTH = 100
+MAX_USERNAME_LENGTH = 50
+PASSWORD_HASH_LENGTH = 255
+ROLE_LENGTH = 10
 SHA256_HEX_LENGTH = 64
 
 
@@ -17,6 +20,53 @@ def _utc_now() -> datetime:
 
 class Base(DeclarativeBase):
     """Common base class that collects all table definitions."""
+
+
+class User(Base):
+    """A person who can log in.
+
+    Attributes:
+        id: Primary key.
+        username: Unique login name.
+        password_hash: Salted PBKDF2 hash; the password itself is never stored.
+        role: ``"admin"`` (manages documents and users) or ``"user"`` (asks questions).
+        created_at: When the account was created (UTC).
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(MAX_USERNAME_LENGTH), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(PASSWORD_HASH_LENGTH))
+    role: Mapped[str] = mapped_column(String(ROLE_LENGTH))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+
+
+class Question(Base):
+    """One question asked and the answer given, kept for review.
+
+    Attributes:
+        id: Primary key.
+        user_id: Who asked.
+        question: The question text.
+        answer: The answer shown to the user.
+        found: False if the documents did not contain the answer.
+        cited_chunk_ids: Comma-separated ids of the chunks cited in the answer.
+        created_at: When it was asked (UTC).
+        user: The asking user.
+    """
+
+    __tablename__ = "questions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    found: Mapped[bool]
+    cited_chunk_ids: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+
+    user: Mapped[User] = relationship()
 
 
 class Document(Base):

@@ -2,28 +2,33 @@
 
 Upload your PDFs, ask questions in plain English, and get answers that cite the exact document, page and passage. If the documents don't contain the answer, it says so instead of guessing.
 
-> Status: project setup complete; features are being built one at a time.
-
 ## Screenshots
 
-_Coming soon._
+_Add screenshots of the chat, documents and login pages here._
 
 ## Features
 
-- **PDF ingestion:** `POST /documents` uploads a PDF; its text is extracted page by page, split into
-  overlapping chunks and indexed for keyword search (SQLite FTS5). `GET /documents` lists them.
-  Scanned (image-only) PDFs are not supported. There is no access control yet.
-- **Embeddings:** after upload, each chunk is turned into a vector by the configured provider
-  (Gemini by default) and stored. If the provider is down, the upload still succeeds and
-  `POST /documents/{id}/embeddings` retries it. **Chunk text is sent to the provider (Google),
-  so do not upload confidential documents while using Gemini's free tier.**
+- **Cited answers:** ask a question in the chat; the answer carries numbered citations. Click one to
+  see the exact passage, document and page. An answer that cites nothing is never shown; if the
+  documents don't contain the answer you are told so.
+- **Hybrid search:** SQLite FTS5 keyword ranking (BM25) plus vector similarity (cosine, pure
+  Python), merged with Reciprocal Rank Fusion. If the embedding provider is down, keyword search
+  still answers.
+- **PDF ingestion:** page-aware chunking with overlap, duplicate detection (SHA-256), size and
+  signature checks. Scanned (image-only) PDFs are not supported.
+- **Roles:** admins upload documents, manage users and review the **question log**; users ask
+  questions. Passwords are salted PBKDF2 hashes; sessions use signed cookies.
+- **Web interface:** single-page app (no build step), light/dark theme, mobile friendly.
+- **Provider-agnostic:** Gemini sits behind `Embedder` / `ChatModel` interfaces; tests use fakes and
+  never touch the network.
 
-_Planned: vector search, cited answers, admin/user roles, question log._
+> **Privacy:** passage text and questions are sent to the AI provider (Google Gemini). On the free
+> tier Google may use them to improve its products, so do not upload confidential documents.
 
 ## Tech stack
 
 - **Language:** Python 3 (virtual environment `docucite-ai`)
-- **Web:** FastAPI + Uvicorn, Pydantic settings
+- **Web:** FastAPI + Uvicorn, Pydantic settings, vanilla JS front end
 - **Database:** SQLite via SQLAlchemy 2.0, with FTS5 for keyword search
 - **PDF parsing:** pypdf
 - **LLM and embeddings:** Google Gemini API (free tier), called over HTTP with httpx
@@ -43,7 +48,11 @@ _Planned: vector search, cited answers, admin/user roles, question log._
    ```powershell
    Copy-Item .env.example .env
    ```
-   Open `.env` and set `GEMINI_API_KEY` (free key: https://aistudio.google.com/apikey).
+   Open `.env` and set:
+   - `GEMINI_API_KEY` (free key: https://aistudio.google.com/apikey)
+   - `SECRET_KEY` (a long random string; signs the login cookie)
+   - `ADMIN_USERNAME` / `ADMIN_PASSWORD` (the first admin, created on first start)
+
    Never commit `.env`.
 
    On Windows with Smart App Control, also set once (then reopen the terminal):
@@ -60,7 +69,8 @@ _Planned: vector search, cited answers, admin/user roles, question log._
    ```powershell
    python -m uvicorn app:create_app --factory --reload
    ```
-   Open http://127.0.0.1:8000/health and http://127.0.0.1:8000/docs.
+   Open http://127.0.0.1:8000 and sign in with the admin from `.env`. API docs are at `/docs`,
+   health at `/health`.
 
 5. **Run the tests and checks**
    ```powershell

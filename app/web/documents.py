@@ -22,16 +22,12 @@ from app.rag.ingest import (
     InvalidPdfError,
     ingest_pdf,
 )
+from app.web.ask import get_embedder
+from app.web.auth import AdminDep, UserDep
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
-
-
-def get_embedder(request: Request) -> Embedder:
-    """Provide the app's embedding provider (a FastAPI dependency)."""
-    embedder: Embedder = request.app.state.embedder
-    return embedder
 
 
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -86,7 +82,11 @@ def _to_out(document: Document, embedded_chunk_count: int) -> DocumentOut:
     },
 )
 def upload_document(
-    request: Request, session: SessionDep, embedder: EmbedderDep, file: UploadFile
+    request: Request,
+    session: SessionDep,
+    embedder: EmbedderDep,
+    _admin: AdminDep,
+    file: UploadFile,
 ) -> DocumentOut:
     """Ingest an uploaded PDF so its pages become searchable.
 
@@ -101,6 +101,7 @@ def upload_document(
         request: Gives access to the application settings.
         session: Database session for this request.
         embedder: Provider used to create embedding vectors.
+        _admin: Ensures the caller is an admin.
         file: The uploaded PDF.
 
     Returns:
@@ -145,7 +146,9 @@ def upload_document(
         status.HTTP_502_BAD_GATEWAY: {"description": "The embedding provider failed."},
     },
 )
-def embed_document(document_id: int, session: SessionDep, embedder: EmbedderDep) -> DocumentOut:
+def embed_document(
+    document_id: int, session: SessionDep, embedder: EmbedderDep, _admin: AdminDep
+) -> DocumentOut:
     """Create embeddings for the chunks of a document that lack one.
 
     Use this to retry after a provider failure, or to embed documents uploaded
@@ -173,7 +176,7 @@ def embed_document(document_id: int, session: SessionDep, embedder: EmbedderDep)
 
 
 @router.get("", response_model=list[DocumentOut])
-def list_documents(session: SessionDep) -> list[DocumentOut]:
+def list_documents(session: SessionDep, _user: UserDep) -> list[DocumentOut]:
     """List all ingested documents, newest first.
 
     Args:

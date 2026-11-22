@@ -5,9 +5,9 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from app import create_app
-from app.config import Settings
 from app.llm import UnavailableEmbedder
 from app.llm.fake import FakeEmbedder
+from tests.conftest import ADMIN_PASSWORD, ADMIN_USERNAME, log_in, make_settings
 from tests.pdf_factory import make_pdf
 
 PDF_TYPE = "application/pdf"
@@ -88,10 +88,11 @@ def test_missing_file_returns_422(client: TestClient) -> None:
 
 def test_oversized_upload_returns_413() -> None:
     """Refuse files above ``MAX_UPLOAD_MB``."""
-    settings = Settings(database_url="sqlite://", max_upload_mb=1, _env_file=None)
+    settings = make_settings(max_upload_mb=1)
     too_big = b"%PDF-" + b"0" * BYTES_PER_MB
 
     with TestClient(create_app(settings, embedder=FakeEmbedder())) as client:
+        log_in(client, ADMIN_USERNAME, ADMIN_PASSWORD)
         response = upload(client, too_big)
 
     assert response.status_code == 413
@@ -108,10 +109,10 @@ def test_upload_creates_embeddings_for_every_chunk(client: TestClient) -> None:
 
 def test_upload_succeeds_when_the_embedding_provider_is_down() -> None:
     """Keep the document (and keyword search) even if embedding fails."""
-    settings = Settings(database_url="sqlite://", _env_file=None)
     down = UnavailableEmbedder("provider down")
 
-    with TestClient(create_app(settings, embedder=down)) as client:
+    with TestClient(create_app(make_settings(), embedder=down)) as client:
+        log_in(client, ADMIN_USERNAME, ADMIN_PASSWORD)
         response = upload(client, make_pdf(["Still searchable by keyword."]))
 
     assert response.status_code == 201

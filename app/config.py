@@ -31,6 +31,14 @@ class Settings(BaseSettings):
         chunk_max_chars: Maximum characters per text chunk.
         chunk_overlap: Characters repeated between neighbouring chunks of a page.
             Must be smaller than ``chunk_max_chars``.
+        answer_top_k: How many passages are given to the model to answer a question.
+        secret_key: Signs the login cookie. If empty, a random key is generated at
+            startup (everyone is logged out on each restart), so set it in ``.env``.
+        admin_username: Username of the first admin, created at startup when no
+            users exist yet.
+        admin_password: Password of that first admin. Leave empty to skip creating it.
+        password_iterations: PBKDF2 work factor for password hashing. High on
+            purpose: it makes stolen password hashes expensive to crack.
     """
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -45,6 +53,11 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=20, ge=1)
     chunk_max_chars: int = Field(default=1200, ge=1)
     chunk_overlap: int = Field(default=200, ge=0)
+    answer_top_k: int = Field(default=5, ge=1, le=20)
+    secret_key: SecretStr = SecretStr("")
+    admin_username: str = "admin"
+    admin_password: SecretStr = SecretStr("")
+    password_iterations: int = Field(default=600_000, ge=1)
 
     @model_validator(mode="after")
     def _overlap_smaller_than_chunk(self) -> "Settings":
