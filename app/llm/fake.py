@@ -3,7 +3,7 @@
 import hashlib
 import math
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 FAKE_DIMENSIONS = 64
 WORD_PATTERN = re.compile(r"\w+")
@@ -73,13 +73,11 @@ class FakeChatModel:
 
     model_name = "fake-chat"
 
-    def __init__(
-        self, reply: str | Callable[[str, str], str] = "Answer from the docs. [1]"
-    ) -> None:
+    def __init__(self, reply: str = "Answer from the docs. [1]") -> None:
         """Create the fake.
 
         Args:
-            reply: A fixed reply, or a function ``(system, user) -> reply``.
+            reply: The text every ``generate`` call returns.
         """
         self.reply = reply
         self.calls: list[tuple[str, str]] = []
@@ -95,6 +93,4 @@ class FakeChatModel:
             The scripted reply.
         """
         self.calls.append((system_prompt, user_prompt))
-        if callable(self.reply):
-            return self.reply(system_prompt, user_prompt)
         return self.reply
