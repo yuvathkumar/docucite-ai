@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docucite-ai"
+version = "0.1.0"
+description = "Ask questions about your PDFs and get answers that cite document, page and passage."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "pydantic-settings>=2.4,<3",
+    # 2.1 loads compiled modules that Windows Smart App Control blocks.
+    "sqlalchemy>=2.0,<2.1",
+    "pypdf>=5,<8",
+    "httpx>=0.27,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "pytest-cov>=5,<8",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

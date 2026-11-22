@@ -1,0 +1,15 @@
+# Virtual environment (named after the project, at the repo root only)
+/docucite-ai/
+
+# Secrets and local state
+.env
+instance/
+*.db
+
+# Python and tool caches
+*.egg-info/
+build/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
