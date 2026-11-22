@@ -40,6 +40,13 @@ def test_extract_citation_numbers_ignores_invalid_and_duplicates() -> None:
     assert extract_citation_numbers("A [2]. B [1][2]. C [9]. D [0].", passage_count=3) == [2, 1]
 
 
+def test_grouped_citations_are_understood() -> None:
+    """Treat ``[1, 3]`` as citations of passages 1 and 3, and split it into one marker each."""
+    assert extract_citation_numbers("Both facts [1, 3].", passage_count=3) == [1, 3]
+    assert remove_invalid_citations("Both facts [1, 3].", passage_count=3) == "Both facts [1][3]."
+    assert remove_invalid_citations("Mixed [2, 9].", passage_count=3) == "Mixed [2]."
+
+
 def test_remove_invalid_citations_keeps_valid_ones() -> None:
     """Strip markers that point to passages that do not exist."""
     assert (
@@ -176,6 +183,53 @@ def test_ask_returns_502_when_the_model_fails(app: FastAPI, client: TestClient) 
 
     assert response.status_code == 502
     assert client.get("/questions").json() == []
+
+
+def ask_three_questions(client: TestClient) -> list[int]:
+    """Upload the sample document, ask three questions and return their log ids."""
+    upload_handbook(client)
+    ids = []
+    for question in ("vacation days per month", "expense reports due", "vacation again"):
+        ids.append(client.post("/ask", json={"question": question}).json()["question_id"])
+    return ids
+
+
+def test_admin_can_delete_one_log_entry(client: TestClient) -> None:
+    """Remove only the chosen entry from the question log."""
+    first, second, third = ask_three_questions(client)
+
+    assert client.delete(f"/questions/{second}").status_code == 204
+
+    remaining = [entry["id"] for entry in client.get("/questions").json()]
+    assert remaining == [third, first]
+
+
+def test_admin_can_clear_the_whole_log(client: TestClient) -> None:
+    """Delete every entry and report how many there were."""
+    ask_three_questions(client)
+
+    response = client.delete("/questions")
+
+    assert response.json() == {"deleted": 3}
+    assert client.get("/questions").json() == []
+
+
+def test_deleting_a_missing_log_entry_returns_404(client: TestClient) -> None:
+    """Report a missing entry instead of failing silently."""
+    assert client.delete("/questions/999").status_code == 404
+
+
+def test_log_deletion_is_admin_only(client: TestClient) -> None:
+    """Forbid normal users and anonymous callers from deleting log entries."""
+    entry = ask_three_questions(client)[0]
+    make_user(client, "alice")
+    client.post("/auth/logout")
+    assert client.delete(f"/questions/{entry}").status_code == 401
+    assert client.delete("/questions").status_code == 401
+    client.post("/auth/login", json={"username": "alice", "password": NEW_PASSWORD})
+
+    assert client.delete(f"/questions/{entry}").status_code == 403
+    assert client.delete("/questions").status_code == 403
 
 
 def test_normal_user_can_ask(client: TestClient) -> None:

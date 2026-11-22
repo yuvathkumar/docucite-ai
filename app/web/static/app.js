@@ -147,6 +147,8 @@ function renderInline(text, sourcesNode) {
     const cite = part.match(/^\[(\d+)\]$/);
     if (bold) {
       fragment.append(el("strong", { text: bold[1] }));
+    } else if (cite && !sourcesNode) {
+      fragment.append(el("span", { class: "chip static", text: cite[1] }));
     } else if (cite) {
       const number = cite[1];
       fragment.append(el("button", {
@@ -428,24 +430,81 @@ dropzone.addEventListener("drop", (event) => uploadFile(event.dataTransfer.files
 
 /* ---------- question log ---------- */
 
+const LOG_CLAMP_CHARS = 280;
+let logRows = [];
+let logFilter = "all";
+let logQuery = "";
+
 async function loadLog() {
-  const rows = await api("/questions");
-  const body = $("#log-body");
-  body.replaceChildren();
-  $("#log-empty").hidden = rows.length > 0;
-  rows.forEach((row) => {
-    body.append(el("tr", {},
-      el("td", { class: "truncate" },
-        el("div", { text: row.question }),
-        el("div", { class: "log-answer", text: row.answer })),
-      el("td", { text: row.username }),
-      el("td", {}, el("span", {
-        class: "badge " + (row.found ? "ok" : "warn"), text: row.found ? "Answered" : "Not found",
-      })),
-      el("td", { class: "muted", text: formatDate(row.created_at) })));
-  });
+  logRows = await api("/questions");
+  renderLog();
 }
 
+function renderLog() {
+  const counts = { all: logRows.length, answered: logRows.filter((row) => row.found).length };
+  counts.notfound = counts.all - counts.answered;
+  Object.entries(counts).forEach(([key, value]) => { $(`#count-${key}`).textContent = String(value); });
+  const query = logQuery.trim().toLowerCase();
+  const rows = logRows.filter((row) =>
+    (logFilter === "all" || (logFilter === "answered") === row.found)
+    && (!query || `${row.question} ${row.answer} ${row.username}`.toLowerCase().includes(query)));
+  $("#log-list").replaceChildren(...rows.map(renderLogItem));
+  const empty = $("#log-empty");
+  empty.hidden = rows.length > 0;
+  empty.textContent = logRows.length === 0 ? "No questions yet." : "No entries match your filter.";
+  $("#log-clear").disabled = logRows.length === 0;
+}
+
+function renderLogItem(row) {
+  const body = el("div", { class: "log-answer rich" }, renderAnswerText(row.answer, null));
+  const isLong = row.answer.length > LOG_CLAMP_CHARS;
+  if (isLong) body.classList.add("clamped");
+  const toggle = isLong ? el("button", {
+    class: "link small", type: "button", text: "Show more",
+    onclick: () => {
+      toggle.textContent = body.classList.toggle("clamped") ? "Show more" : "Show less";
+    },
+  }) : null;
+  return el("article", { class: "log-item" },
+    el("header", { class: "log-head" },
+      el("h3", { class: "log-question", text: row.question }),
+      el("button", {
+        class: "link danger small", type: "button", text: "Delete",
+        onclick: async () => {
+          if (!confirm("Delete this log entry? This cannot be undone.")) return;
+          try {
+            await api(`/questions/${row.id}`, { method: "DELETE" });
+            logRows = logRows.filter((entry) => entry.id !== row.id);
+            renderLog();
+            toast("Log entry deleted.");
+          } catch (error) { toast(error.message, true); }
+        },
+      })),
+    el("div", { class: "log-meta" },
+      el("span", { class: "badge " + (row.found ? "ok" : "warn"), text: row.found ? "Answered" : "Not found" }),
+      el("span", { class: "muted small", text: `${row.username} · ${formatDate(row.created_at)}` })),
+    body, toggle);
+}
+
+document.querySelectorAll(".seg").forEach((button) => button.addEventListener("click", () => {
+  logFilter = button.dataset.filter;
+  document.querySelectorAll(".seg").forEach((other) => other.classList.toggle("active", other === button));
+  renderLog();
+}));
+
+$("#log-search").addEventListener("input", (event) => {
+  logQuery = event.target.value;
+  renderLog();
+});
+
+$("#log-clear").addEventListener("click", async () => {
+  if (!confirm(`Delete all ${logRows.length} log entries? This removes the review trail and cannot be undone.`)) return;
+  try {
+    const result = await api("/questions", { method: "DELETE" });
+    toast(`${result.deleted} log entries deleted.`);
+    await loadLog();
+  } catch (error) { toast(error.message, true); }
+});
 /* ---------- users ---------- */
 
 async function loadUsers() {

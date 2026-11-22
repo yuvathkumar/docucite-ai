@@ -185,14 +185,18 @@
 
       <!-- Question log -->
       <section id="view-log" class="view page" hidden>
-        <header class="page-head"><h1>Question log</h1><p class="muted">Every question and answer, for review. “Not found” questions show what documents are missing.</p></header>
-        <div class="card table-card">
-          <table>
-            <thead><tr><th>Question</th><th>Asked by</th><th>Result</th><th>When</th></tr></thead>
-            <tbody id="log-body"></tbody>
-          </table>
-          <p id="log-empty" class="empty-row muted" hidden>No questions yet.</p>
+        <header class="page-head"><h1>Question log</h1><p class="muted">Every question and answer, for review. “Not found” questions show which documents are missing.</p></header>
+        <div class="toolbar">
+          <div class="segmented" role="group" aria-label="Filter by result">
+            <button class="seg active" data-filter="all" type="button">All <span id="count-all" class="count">0</span></button>
+            <button class="seg" data-filter="answered" type="button">Answered <span id="count-answered" class="count">0</span></button>
+            <button class="seg" data-filter="notfound" type="button">Not found <span id="count-notfound" class="count">0</span></button>
+          </div>
+          <input id="log-search" class="search" type="search" placeholder="Search questions and answers…" aria-label="Search the question log">
+          <button id="log-clear" class="btn small danger-btn" type="button">Clear all</button>
         </div>
+        <div id="log-list" class="log-list"></div>
+        <p id="log-empty" class="card empty-row muted" hidden>No questions yet.</p>
       </section>
 
       <!-- Users -->

@@ -5,7 +5,8 @@ import re
 from app.rag.search import SearchHit
 
 NOT_FOUND_TOKEN = "NOT_FOUND"
-CITATION_PATTERN = re.compile(r"\[(\d+)\]")
+# Matches "[2]" and also grouped markers such as "[1, 3]" that models sometimes write.
+CITATION_PATTERN = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
 SYSTEM_PROMPT = f"""You answer questions using ONLY the numbered passages provided.
 
@@ -47,15 +48,20 @@ def extract_citation_numbers(answer: str, passage_count: int) -> list[int]:
         Unique valid citation numbers in order of first appearance.
 
     Example:
-        >>> extract_citation_numbers("A [2]. B [1][2]. C [9].", passage_count=3)
-        [2, 1]
+        >>> extract_citation_numbers("A [2]. B [1][2]. C [9]. D [3, 1].", passage_count=3)
+        [2, 1, 3]
     """
     numbers: list[int] = []
     for match in CITATION_PATTERN.finditer(answer):
-        number = int(match.group(1))
-        if 1 <= number <= passage_count and number not in numbers:
-            numbers.append(number)
+        for number in _numbers_in(match):
+            if 1 <= number <= passage_count and number not in numbers:
+                numbers.append(number)
     return numbers
+
+
+def _numbers_in(match: re.Match[str]) -> list[int]:
+    """Read the numbers inside one citation marker such as ``[2]`` or ``[1, 3]``."""
+    return [int(part) for part in match.group(1).split(",")]
 
 
 def remove_invalid_citations(answer: str, passage_count: int) -> str:
@@ -71,10 +77,13 @@ def remove_invalid_citations(answer: str, passage_count: int) -> str:
     Example:
         >>> remove_invalid_citations("Fact [1] and fake [9].", passage_count=2)
         'Fact [1] and fake.'
+        >>> remove_invalid_citations("Both [1, 2].", passage_count=2)
+        'Both [1][2].'
     """
 
     def keep_or_drop(match: re.Match[str]) -> str:
-        return match.group(0) if 1 <= int(match.group(1)) <= passage_count else ""
+        # "[1, 3]" becomes "[1][3]" so the interface can show one chip per source.
+        return "".join(f"[{n}]" for n in _numbers_in(match) if 1 <= n <= passage_count)
 
     cleaned = CITATION_PATTERN.sub(keep_or_drop, answer)
     return re.sub(r"\s+([.,;:])", r"\1", cleaned).strip()

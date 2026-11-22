@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -174,6 +174,58 @@ def ask(
             for citation in result.citations
         ],
     )
+
+
+class DeletedCount(BaseModel):
+    """Result of clearing the question log.
+
+    Attributes:
+        deleted: How many log entries were removed.
+    """
+
+    deleted: int
+
+
+@router.delete(
+    "/questions/{question_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_404_NOT_FOUND: {"description": "No such log entry."}},
+)
+def delete_question(question_id: int, _admin: AdminDep, session: SessionDep) -> None:
+    """Delete one entry from the question log (admins only).
+
+    Args:
+        question_id: The log entry to delete.
+        _admin: Ensures the caller is an admin.
+        session: Database session.
+
+    Raises:
+        HTTPException: 404 if there is no such entry.
+    """
+    entry = session.get(Question, question_id)
+    if entry is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Log entry not found.")
+    session.delete(entry)
+    session.commit()
+
+
+@router.delete("/questions", response_model=DeletedCount)
+def clear_questions(_admin: AdminDep, session: SessionDep) -> DeletedCount:
+    """Delete every entry in the question log (admins only).
+
+    This removes the review trail, so the interface asks for confirmation first.
+
+    Args:
+        _admin: Ensures the caller is an admin.
+        session: Database session.
+
+    Returns:
+        How many entries were deleted.
+    """
+    total = session.scalar(select(func.count(Question.id))) or 0
+    session.execute(delete(Question))
+    session.commit()
+    return DeletedCount(deleted=total)
 
 
 @router.get("/questions", response_model=list[QuestionOut])
