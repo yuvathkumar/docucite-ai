@@ -16,6 +16,8 @@ REQUEST_TIMEOUT_SECONDS = 60.0
 MAX_ATTEMPTS = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
 MAX_RETRY_DELAY_SECONDS = 40.0
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 DOCUMENT_TASK_TYPE = "RETRIEVAL_DOCUMENT"
 QUERY_TASK_TYPE = "RETRIEVAL_QUERY"
@@ -45,19 +47,63 @@ def retry_delay_seconds(response: httpx.Response | None, attempt: int) -> float:
         7.0
     """
     default = RETRY_BASE_DELAY_SECONDS * float(2 ** (attempt - 1))
-    if response is None:
+    asked = server_retry_delay(response) if response is not None else None
+    if asked is None:
         return default
+    return min(max(asked, default), MAX_RETRY_DELAY_SECONDS)
+
+
+def server_retry_delay(response: httpx.Response) -> float | None:
+    """Read how long the server asked us to wait, without any cap.
+
+    Args:
+        response: A failed response.
+
+    Returns:
+        Seconds from the ``Retry-After`` header or the error body's ``retryDelay``,
+        or None if the server gave no hint.
+
+    Example:
+        >>> server_retry_delay(httpx.Response(429, headers={"Retry-After": "7"}))
+        7.0
+        >>> server_retry_delay(httpx.Response(429)) is None
+        True
+    """
     header = response.headers.get("retry-after", "")
     if header.replace(".", "", 1).isdigit():
-        return min(float(header), MAX_RETRY_DELAY_SECONDS)
+        return float(header)
     try:
         for detail in response.json()["error"]["details"]:
             delay = detail.get("retryDelay")
             if isinstance(delay, str) and delay.endswith("s"):
-                return min(max(float(delay[:-1]), default), MAX_RETRY_DELAY_SECONDS)
+                return float(delay[:-1])
     except (KeyError, TypeError, ValueError, AttributeError):
         pass
-    return default
+    return None
+
+
+def describe_wait(seconds: float) -> str:
+    """Say a waiting time in plain words for an error message.
+
+    Args:
+        seconds: The wait in seconds.
+
+    Returns:
+        For example ``"about a minute"``, ``"about 20 minutes"`` or ``"about 18 hours"``.
+
+    Example:
+        >>> describe_wait(45)
+        'about a minute'
+        >>> describe_wait(1500)
+        'about 25 minutes'
+        >>> describe_wait(66273)
+        'about 18 hours'
+    """
+    if seconds < SECONDS_PER_MINUTE * 1.5:
+        return "about a minute"
+    if seconds < SECONDS_PER_HOUR:
+        return f"about {round(seconds / SECONDS_PER_MINUTE)} minutes"
+    return f"about {round(seconds / SECONDS_PER_HOUR)} hours"
 
 
 class GeminiHttp:
@@ -116,10 +162,34 @@ class GeminiHttp:
                     raise error_type(f"Gemini returned HTTP {response.status_code}.")
                 reason = f"HTTP {response.status_code}"
                 failed_response = response
+                self._fail_fast_if_quota_used_up(response, error_type)
             logger.warning("Gemini attempt %d/%d failed: %s", attempt, MAX_ATTEMPTS, reason)
             if attempt < MAX_ATTEMPTS:
                 self._sleep(retry_delay_seconds(failed_response, attempt))
         raise error_type(f"Gemini is unavailable after {MAX_ATTEMPTS} attempts ({reason}).")
+
+    @staticmethod
+    def _fail_fast_if_quota_used_up(response: httpx.Response, error_type: type[Exception]) -> None:
+        """Stop at once when Gemini says the limit will not reset for a long time.
+
+        A free-tier daily quota resets in hours. Waiting 40 seconds and retrying
+        cannot help, and only delays the clear message the user needs.
+
+        Args:
+            response: The failed response.
+            error_type: Exception class to raise.
+
+        Raises:
+            Exception: An ``error_type`` instance if this is a 429 whose reset time
+                is longer than the longest wait we are willing to do.
+        """
+        if response.status_code != httpx.codes.TOO_MANY_REQUESTS:
+            return
+        asked = server_retry_delay(response)
+        if asked is not None and asked > MAX_RETRY_DELAY_SECONDS:
+            raise error_type(
+                f"Gemini's free-tier limit is used up for now; try again in {describe_wait(asked)}."
+            )
 
 
 class GeminiEmbedder:

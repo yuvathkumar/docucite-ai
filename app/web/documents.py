@@ -176,7 +176,7 @@ def embed_document(
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,
             f"{error} {done} of {document.chunk_count} passages are indexed so far; "
-            "wait a minute and press Retry to continue.",
+            "press Continue later to finish.",
         ) from error
     return _to_out(document, count_embedded_chunks(session).get(document_id, 0))
 

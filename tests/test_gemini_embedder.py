@@ -123,6 +123,40 @@ def test_rate_limit_uses_retry_delay_from_the_error_body() -> None:
     assert sleeps == [12.0]
 
 
+def test_daily_quota_fails_immediately_with_a_clear_message() -> None:
+    """Do not retry when Gemini says the limit resets in hours; say when to try again."""
+    calls = {"count": 0}
+    sleeps: list[float] = []
+    body = {"error": {"details": [{"retryDelay": "66273s"}]}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        return httpx.Response(429, json=body)
+
+    with pytest.raises(EmbeddingError, match="about 18 hours"):
+        make_embedder(handler, sleeps).embed_documents(["x"])
+
+    assert calls["count"] == 1
+    assert sleeps == []
+
+
+def test_short_rate_limit_is_still_waited_out() -> None:
+    """Keep retrying when the reset is within the wait cap (a per-minute limit)."""
+    calls = {"count": 0}
+    sleeps: list[float] = []
+    body = {"error": {"details": [{"retryDelay": "30s"}]}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        return (
+            httpx.Response(429, json=body) if calls["count"] == 1 else embeddings_response(request)
+        )
+
+    make_embedder(handler, sleeps).embed_documents(["x"])
+
+    assert sleeps == [30.0]
+
+
 def test_retry_delay_is_capped() -> None:
     """Never block a request for minutes, whatever the server asks."""
     assert retry_delay_seconds(httpx.Response(429, headers={"Retry-After": "900"}), 1) == 40.0
