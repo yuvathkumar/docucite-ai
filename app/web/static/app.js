@@ -30,7 +30,7 @@ function el(tag, props = {}, ...children) {
 function toast(message, isError = false) {
   const node = el("div", { class: "toast" + (isError ? " error" : ""), text: message });
   $("#toasts").append(node);
-  setTimeout(() => node.remove(), 5000);
+  setTimeout(() => node.remove(), isError ? 9000 : 5000);
 }
 
 async function api(path, options = {}) {
@@ -255,30 +255,87 @@ SUGGESTIONS.forEach((text) => {
 
 /* ---------- documents ---------- */
 
+/* Indexing state: which documents are being embedded right now, and a poller that
+ * refreshes the table every few seconds so the user sees real progress. */
+const indexingIds = new Set();
+let uploadInProgress = false;
+let pollTimer = null;
+let loadingDocuments = false;
+const POLL_INTERVAL_MS = 3000;
+
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(() => loadDocuments().catch(() => {}), POLL_INTERVAL_MS);
+}
+
+function stopPolling() {
+  if (indexingIds.size > 0 || uploadInProgress) return;
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+function indexingCell(doc) {
+  const percent = doc.chunk_count ? Math.round((100 * doc.embedded_chunk_count) / doc.chunk_count) : 0;
+  const bar = el("i");
+  bar.style.width = `${percent}%`;
+  return el("div", { class: "indexing" },
+    el("div", { class: "indexing-line" },
+      el("span", { class: "spinner", "aria-hidden": "true" }),
+      el("span", { class: "indexing-text", text: `Indexing ${doc.embedded_chunk_count} / ${doc.chunk_count} (${percent}%)` })),
+    el("div", { class: "progress", role: "progressbar", "aria-valuenow": String(percent), "aria-valuemin": "0", "aria-valuemax": "100" }, bar),
+    el("div", { class: "muted small", text: "The free AI tier limits speed, so this can take a minute or two. You can leave this page open." }));
+}
+
+async function retryIndexing(doc) {
+  indexingIds.add(doc.id);
+  startPolling();
+  loadDocuments().catch(() => {});
+  try {
+    await api(`/documents/${doc.id}/embeddings`, { method: "POST" });
+    toast(`“${doc.filename}” is fully indexed.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    indexingIds.delete(doc.id);
+    stopPolling();
+    loadDocuments().catch(() => {});
+  }
+}
+
 async function loadDocuments() {
-  const documents = await api("/documents");
+  if (loadingDocuments) return;
+  loadingDocuments = true;
+  try {
+    renderDocuments(await api("/documents"));
+  } finally {
+    loadingDocuments = false;
+  }
+}
+
+function renderDocuments(documents) {
   const body = $("#documents-body");
   body.replaceChildren();
   $("#documents-empty").hidden = documents.length > 0;
   const isAdmin = currentUser && currentUser.role === "admin";
   documents.forEach((doc) => {
     const complete = doc.embedded_chunk_count >= doc.chunk_count;
-    const status = el("td", {},
-      el("span", {
-        class: "badge " + (complete ? "ok" : "warn"),
-        text: complete ? "Ready" : `Keyword only (${doc.embedded_chunk_count}/${doc.chunk_count})`,
+    const busy = !complete && (indexingIds.has(doc.id) || uploadInProgress);
+    const status = el("td", {});
+    if (complete) {
+      status.append(el("span", { class: "badge ok", text: "Ready" }));
+    } else if (busy) {
+      status.append(indexingCell(doc));
+    } else {
+      status.append(el("span", {
+        class: "badge warn", text: `Keyword only (${doc.embedded_chunk_count}/${doc.chunk_count})`,
       }));
-    if (!complete && isAdmin) {
-      status.append(" ", el("button", {
-        class: "link small", type: "button", text: "Retry",
-        onclick: async () => {
-          try {
-            await api(`/documents/${doc.id}/embeddings`, { method: "POST" });
-            toast("Search index updated.");
-          } catch (error) { toast(error.message, true); }
-          loadDocuments();
-        },
-      }));
+      if (isAdmin) {
+        status.append(" ", el("button", {
+          class: "link small", type: "button",
+          text: doc.embedded_chunk_count > 0 ? "Continue" : "Retry",
+          onclick: () => retryIndexing(doc),
+        }));
+      }
     }
     body.append(el("tr", {},
       el("td", { class: "truncate", text: doc.filename }),
@@ -286,7 +343,7 @@ async function loadDocuments() {
       el("td", { class: "num", text: String(doc.chunk_count) }),
       status,
       el("td", { class: "muted", text: formatDate(doc.uploaded_at) }),
-      el("td", {}, isAdmin ? el("button", {
+      el("td", {}, isAdmin && !busy ? el("button", {
         class: "link danger small", type: "button", text: "Delete",
         onclick: async () => {
           if (!confirm(`Delete “${doc.filename}”? Its passages and search data will be removed.`)) return;
@@ -294,7 +351,7 @@ async function loadDocuments() {
             await api(`/documents/${doc.id}`, { method: "DELETE" });
             toast("Document deleted.");
           } catch (error) { toast(error.message, true); }
-          loadDocuments();
+          loadDocuments().catch(() => {});
         },
       }) : null)));
   });
@@ -307,20 +364,28 @@ async function uploadFile(file) {
     status.textContent = "Only PDF files are supported.";
     return;
   }
-  status.textContent = `Uploading ${file.name}…`;
+  uploadInProgress = true;
+  startPolling();
+  status.replaceChildren(el("span", { class: "spinner", "aria-hidden": "true" }),
+    ` Uploading and indexing “${file.name}”… large documents can take a minute or two.`);
+  $("#upload-card").classList.add("busy");
   const form = new FormData();
   form.append("file", file);
   try {
     const doc = await api("/documents", { method: "POST", body: form });
-    status.textContent = "";
-    toast(`Added “${doc.filename}” (${doc.page_count} pages, ${doc.chunk_count} passages).`);
-    await loadDocuments();
+    const note = doc.embedded_chunk_count < doc.chunk_count
+      ? " Search indexing is incomplete; use Continue to finish it." : "";
+    toast(`Added “${doc.filename}” (${doc.page_count} pages, ${doc.chunk_count} passages).${note}`);
   } catch (error) {
-    status.textContent = "";
     toast(error.message, true);
+  } finally {
+    uploadInProgress = false;
+    status.textContent = "";
+    $("#upload-card").classList.remove("busy");
+    stopPolling();
+    loadDocuments().catch(() => {});
   }
 }
-
 const dropzone = $("#upload-card");
 $("#browse").addEventListener("click", () => $("#file-input").click());
 $("#file-input").addEventListener("change", (event) => {

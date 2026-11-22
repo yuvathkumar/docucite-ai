@@ -227,6 +227,18 @@ td.truncate { max-width: 420px; overflow-wrap: anywhere; }
 .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
 .drop-icon { width: 34px; height: 34px; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 6px; }
 
+/* ---------- Indexing progress ---------- */
+.spinner {
+  display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: -2px;
+  border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.indexing { min-width: 220px; max-width: 320px; }
+.indexing-line { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.85rem; color: var(--accent); }
+.progress { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 6px 0 4px; }
+.progress i { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.6s ease; }
+.dropzone.busy { opacity: 0.85; border-color: var(--accent); }
+
 /* ---------- Toasts ---------- */
 .toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 10; max-width: min(380px, calc(100vw - 32px)); }
 .toast { background: var(--text); color: var(--bg); padding: 11px 16px; border-radius: 12px; box-shadow: var(--shadow); font-size: 0.9rem; animation: rise 0.2s ease-out; }
